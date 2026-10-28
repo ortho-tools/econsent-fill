@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fill Consent Guide</title>
+<style>
+  :root {
+    --bg: #fafaf7; --card: #ffffff; --ink: #1d1d1f; --muted: #5f6368; --line: #e3e3de;
+    --accent: #0b6e4f; --accent-soft: #e6f3ee; --warn: #9a3412; --warn-soft: #fff1e6; --code: #f3f3ef;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141414; --card: #1e1e1e; --ink: #ececec; --muted: #a3a3a3; --line: #333;
+      --accent: #5fd0a6; --accent-soft: #17312a; --warn: #fdba74; --warn-soft: #3a2414; --code: #262626;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141414; --card: #1e1e1e; --ink: #ececec; --muted: #a3a3a3; --line: #333;
+    --accent: #5fd0a6; --accent-soft: #17312a; --warn: #fdba74; --warn-soft: #3a2414; --code: #262626;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 8px 0 6px; }
+  h2 { font-size: 20px; margin: 36px 0 12px; }
+  .lead { color: var(--muted); margin: 0 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin: 12px 0; }
+  ol { padding-left: 22px; margin: 8px 0; }
+  li { margin: 8px 0; }
+  b { font-weight: 650; }
+  code, .k { background: var(--code); border-radius: 6px; padding: 1px 6px; font: 15px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .step { display: flex; gap: 12px; align-items: flex-start; }
+  .n { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--bg); display: grid; place-items: center; font-weight: 700; font-size: 15px; margin-top: 2px; }
+  .step p { margin: 0; }
+  .where { display: inline-block; font-size: 13px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); margin: 18px 0 4px; }
+  .note { background: var(--accent-soft); border-radius: 12px; padding: 12px 14px; margin: 12px 0; }
+  .warn { background: var(--warn-soft); color: var(--ink); border-radius: 12px; padding: 12px 14px; margin: 12px 0; }
+  .warn b { color: var(--warn); }
+  button { font: inherit; font-weight: 650; border: 0; border-radius: 10px; padding: 12px 18px; background: var(--accent); color: var(--bg); cursor: pointer; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); }
+  pre { white-space: pre-wrap; word-break: break-word; background: var(--code); border-radius: 10px; padding: 12px; font: 13px/1.45 ui-monospace, Menlo, monospace; max-height: 360px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  td { border-top: 1px solid var(--line); padding: 8px 6px; vertical-align: top; }
+  td:first-child { white-space: nowrap; width: 1%; }
+  .muted { color: var(--muted); font-size: 15px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fill consent</h1>
+  <p class="lead">Fills the KSUMC eConsent surgical and blood forms on your iPhone from one block your AI writes. You type only the MRN. Names, IDs, wording and Arabic are filled for you.</p>
+  <p class="muted">It never submits and never signs. You check, the patient and staff sign, you submit.</p>
+
+  <h2>Set up once (5 minutes)</h2>
+  <div class="card">
+    <div class="step"><span class="n">1</span><p><b>Allow scripts.</b> iPhone Settings → Apps → Shortcuts → Advanced → <b>Allow Running Scripts</b>: on.</p></div>
+  </div>
+  <div class="card">
+    <div class="step"><span class="n">2</span><p><b>Install the Shortcut</b> from the link you were sent → <b>Add Shortcut</b>. It asks for your defaults:<br>
+      after <code>my registrar:</code> your usual registrar's short name from the staff list (e.g. <code>tamer</code>),<br>
+      after <code>my resident:</code> the resident who is your second witness (e.g. <code>hayfa</code>).<br>
+      <span class="muted">New rotation? Shortcuts app → tap ⋯ on Fill consent → edit the first box.</span></p></div>
+  </div>
+  <div class="card">
+    <div class="step"><span class="n">3</span><div>
+      <p><b>Teach your AI.</b> Make a project in your AI app and paste this prompt as its instructions:</p>
+      <ul class="muted">
+        <li>ChatGPT: Projects → New project → ⋯ → Instructions</li>
+        <li>Claude: Projects → New project → Project instructions</li>
+        <li>Gemini: Gems → New Gem → Instructions</li>
+      </ul>
+      <button id="copy" type="button">Copy the prompt</button>
+      <details><summary>Show the prompt</summary><pre id="prompt">Loading…</pre></details>
+    </div></div>
+  </div>
+  <div class="card">
+    <div class="step"><span class="n">4</span><p><b>Put it near the top of the Share menu</b> (optional). In Safari tap Share, scroll down → <b>Edit Actions</b> → tap ＋ next to <b>Fill consent</b>.</p></div>
+  </div>
+
+  <h2>Each patient</h2>
+  <div class="note"><b>"Fill"</b> below always means: in Safari, tap <b>Share → Fill consent</b>.</div>
+
+  <span class="where">At the station</span>
+  <div class="card">
+    <ol>
+      <li><b>In your AI project:</b> consultant, nurse, procedure. For example <code>alshaygy raghad right TKR</code>. Add <code>high risk</code>, <code>long</code> or <code>short</code> if needed. Tap <b>copy</b> on the block.</li>
+      <li><b>Safari, surgical consent → Fill.</b> Type the <b>MRN</b> in the box → Done. The page reloads with the patient: <b>check the name.</b></li>
+      <li>The blood consent opens in a new tab: <b>Fill</b> there too.</li>
+    </ol>
+  </div>
+
+  <span class="where">At the bedside</span>
+  <div class="card">
+    <ol>
+      <li><b>Patient signs:</b> tap <b>Patient</b> on each form, they sign each.</li>
+      <li><b>Guardian or relative signs:</b> on the surgical form tap Guardian/Relative, type the name (and relation), they sign, then <b>Fill</b> (it saves the signer). On the blood form <b>tap the same signer yourself</b>, then <b>Fill</b> (it adds the name). They sign.</li>
+    </ol>
+  </div>
+
+  <span class="where">Back at the station</span>
+  <div class="card">
+    <ol>
+      <li><b>Different nurse?</b> <b>Fill</b> on each form, then tap the right name in the yellow box under the witness.</li>
+      <li>Nurse, second witness and you sign both → <b>Submit</b> both.</li>
+    </ol>
+  </div>
+
+  <h2>Optional words for your AI</h2>
+  <div class="card">
+    <table>
+      <tr><td><code>high risk</code></td><td>ticks high risk on both forms</td></tr>
+      <tr><td><code>long</code> / <code>short</code></td><td>full complications (with death) or local ones only. The AI picks long by itself for joints, spine, tumours, hip fractures.</td></tr>
+      <tr><td><code>registrar gouda</code><br><code>registrar trauma</code></td><td>a different registrar for this patient (by name or subspecialty)</td></tr>
+      <tr><td><code>resident Faisal Alharbi</code></td><td>a different second witness for this patient</td></tr>
+      <tr><td><code>Maria Lopez</code> as the nurse</td><td>a nurse's full name works too. A first name that isn't on the staff list makes Fill ask for the full name and add it for everyone.</td></tr>
+      <tr><td><code>blood only</code></td><td>just the blood consent</td></tr>
+    </table>
+  </div>
+
+  <h2>The staff list</h2>
+  <div class="card">
+    <p>Nurses, consultants, registrars and residents live in one shared Google Sheet (the link you were sent). <b>New nurses add themselves:</b> when Fill doesn't know the name, it asks for the full name (first and last) and adds it to the Sheet for everyone. Type <code>-</code> there for no nurse. You can also add one by hand: a new row with <code>nurse</code>, the first name in small letters, the full name. Everyone has it on their next Fill. The Sheet's "How to edit" tab has the details, and its version history undoes mistakes.</p>
+  </div>
+
+  <h2>If something goes wrong</h2>
+  <div class="card">
+    <table>
+      <tr><td>⚠️</td><td>The message says what's wrong: no block copied, a different patient, a name not on the list. Nothing was changed when it stops.</td></tr>
+      <tr><td>❓</td><td>Fill needs one answer (e.g. a new nurse's full name). Type it and tap Done.</td></tr>
+      <tr><td>🔄</td><td>The page needed to reload first. When it has, Fill again.</td></tr>
+      <tr><td>Nothing happens</td><td>Setup step 1, or you ran it from a page that isn't the consent form.</td></tr>
+      <tr><td>"No internet"</td><td>It used its saved copy. Fine to carry on.</td></tr>
+      <tr><td>Fields stop filling</td><td>The hospital changed the site. Contact the developer, with a screenshot.</td></tr>
+    </table>
+    <p class="muted">Fallback: copy each part from your AI and paste it into the form by hand.</p>
+  </div>
+
+  <div class="warn"><b>Patient privacy:</b> never type the patient's name or MRN into your AI. The MRN goes only into the Shortcut's box on your phone.</div>
+</main>
+<script>
+  var pre = document.getElementById('prompt'), text = '';
+  fetch('prompt.md', { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : Promise.reject(); })
+    .then(function (t) { text = t; pre.textContent = t; })
+    .catch(function () { pre.innerHTML = 'Couldn\'t load it here. Open <a href="prompt.md">prompt.md</a> and copy it all.'; });
+  document.getElementById('copy').onclick = function () {
+    var b = this;
+    if (!text) { location.href = 'prompt.md'; return; }
+    var ok = function () { b.textContent = 'Copied ✓'; setTimeout(function () { b.textContent = 'Copy the prompt'; }, 2000); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback); else fallback();
+    function fallback() {
+      var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); ok(); } catch (e) { location.href = 'prompt.md'; }
+      t.remove();
+    }
+  };
+</script>
+</body>
+</html>
