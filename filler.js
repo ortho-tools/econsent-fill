@@ -42,7 +42,7 @@
     // Answer typed in the shared Shortcut's question popup (it asks when an answer starts with ❓).
     var canAsk = viaShortcut && typeof CF_ANSWER !== 'undefined';
     var answer = canAsk ? dec(CF_ANSWER).trim() : '';
-    // Google Apps Script web app on the staff Sheet that adds a new nurse (sheet-add-nurse.gs).
+    // Google Apps Script web app on the staff Sheet that adds a new person or another name for someone (sheet-add-person.gs).
     var ADD_URL = 'https://script.google.com/macros/s/AKfycbwtFI7RBqQ2mvVmTQsT_ZEhngIK4mtfvlO8IkFO2Mhjee6DBYNW0vWRMmiO-MBr3-MAkQ/exec';
     if (viaShortcut && staffTxt) { ls('consentFillerStaff', staffTxt); ls('consentFillerCode', '(' + cfMain.toString() + ')();'); }
     var $ = function (id) { return document.getElementById(id); };
@@ -91,13 +91,62 @@
       else if (p.length === 2) staff[role].push({ key: low(p[0]), id: '', name: p[1] });
       else staff[role].push({ key: low(p[0]), id: (p[1] && p[1] !== '-') ? p[1] : '', name: p[2] || p[0] });
     });
+    // A short name cell can hold several names for one person: "almuhanna, muhanna".
+    ['dr', 'consultant', 'resident', 'nurse'].forEach(function (r) {
+      staff[r].forEach(function (x) { x.keys = String(x.key).split(/\s*[,\/]\s*/).filter(Boolean); x.key = x.keys[0] || ''; });
+    });
+    var base = function (x) { return String(x.name || '').split(' — ')[0]; };
+    // Names compared without letters case, spaces, hyphens or a leading "al"/"el": "Al-Muhanna" = "muhanna".
+    var norm = function (s) { s = low(s).replace(/[^a-z]/g, ''); return s.length > 4 ? s.replace(/^(al|el)/, '') : s; };
+    // Letters added, dropped, changed or swapped (optimal string alignment distance).
+    var dist = function (a, b) {
+      var d = [], i, j;
+      for (i = 0; i <= a.length; i++) d[i] = [i];
+      for (j = 0; j <= b.length; j++) d[0][j] = j;
+      for (i = 1; i <= a.length; i++) for (j = 1; j <= b.length; j++) {
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+      }
+      return d[a.length][b.length];
+    };
+    // Everyone within a small typo of q (1 letter for short names, 2 from 6 letters), closest first.
+    var close = function (list, q) {
+      var n = norm(q), best = 9, who = [];
+      if (n.length < 4) return [];
+      list.forEach(function (x) {
+        var d = Math.min.apply(null, x.keys.concat([base(x)], base(x).split(' ')).map(norm)
+          .filter(function (k) { return k.length >= 3; }).map(function (k) { return dist(n, k); }).concat([9]));
+        if (d < best) { best = d; who = [x]; } else if (d === best && who.indexOf(x) < 0) who.push(x);
+      });
+      return best <= (n.length < 6 ? 1 : 2) ? who : [];
+    };
+    var guessed = []; // typos read as someone, shown in the answer so a wrong guess is seen
     var find = function (list, q) {
       q = low(q);
       if (!q) return null;
-      return list.filter(function (x) { return x.key === q; })[0] ||
-             list.filter(function (x) { return low(x.name) === q; })[0] ||
-             list.filter(function (x) { return low(x.name).indexOf(q) >= 0; })[0] || null;
+      var one = function (f) { return list.filter(f)[0]; };
+      var hit = one(function (x) { return x.keys.indexOf(q) >= 0; }) ||
+        one(function (x) { return low(x.name) === q || low(base(x)) === q; }) ||
+        one(function (x) { return x.keys.concat([base(x)]).some(function (k) { return norm(k) === norm(q); }); }) ||
+        (q.length >= 3 ? one(function (x) { return low(x.name).indexOf(q) >= 0; }) : null);
+      if (hit) return hit;
+      var near = close(list, q);
+      if (near.length !== 1) return null;
+      var g = '"' + q + '" read as ' + base(near[0]);
+      if (guessed.indexOf(g) < 0) guessed.push(g);
+      return near[0];
     };
+
+    // Names typed in the ❓ popup on this phone: used at once and kept for 14 days (the Sheet has
+    // them within minutes). A new person joins the list; a typo of someone becomes another name for them.
+    var learned = [];
+    try { learned = JSON.parse(ls('consentFillerLearned') || '[]').filter(function (e) { return Date.now() - e.ts < 14 * 864e5; }); } catch (e) {}
+    var remember = function (e) {
+      var list = staff[e.role], x = list.filter(function (y) { return (e.id && low(y.id) === low(e.id)) || low(base(y)) === low(e.name); })[0];
+      if (!x) list.push(x = { key: e.key, keys: [], id: e.id || '', name: e.name });
+      if (x.keys.indexOf(e.key) < 0) x.keys.push(e.key);
+    };
+    learned.forEach(remember);
 
     // ---------- CONSENT block from Claude (on the clipboard)
     // Copying from the Claude app can put formatted text on the clipboard: turn HTML or RTF into plain text.
@@ -145,6 +194,46 @@
     // An MRN typed in the popup for someone else starts a new patient with the same block.
     if (askedMrn && c && !(mem && mem.mrn === askedMrn)) mem = { mrn: askedMrn, block: c };
 
+    // ---------- the answer to the last ❓ question (who it was about is kept in localStorage)
+    var ROLE = { dr: 'registrar', consultant: 'consultant', resident: 'resident', nurse: 'nurse' };
+    var skip = (mem && mem.skip) || {}, news = [], retry = '';
+    var post = function (d) {
+      // Sent even if the page reloads straight after (keepalive); the Sheet's answer can't be read here.
+      if (ADD_URL) try { fetch(ADD_URL, { method: 'POST', mode: 'no-cors', keepalive: true, body: JSON.stringify(d) }); } catch (e) {}
+    };
+    var learn = function (role, q, a) {
+      if (/^(-|none|no)$/i.test(a)) { skip[role] = low(q); if (mem) mem.skip = skip; return; }
+      var list = staff[role], qk = /^[a-z][a-z'-]{1,20}$/.test(low(q)) ? low(q) : '';
+      var id = role === 'dr' ? (a.match(/\bkk\s*\d{4,8}\b/i) || [''])[0].replace(/\s/g, '').toLowerCase() : '';
+      var nm = titled(a.replace(/\bkk\s*\d+\b/ig, ' ').replace(/\s+/g, ' '));
+      var x = id ? list.filter(function (y) { return low(y.id) === id; })[0] : find(list, nm);
+      var e = { role: role, ts: Date.now() };
+      if (x) {
+        // Someone already on the list: what was typed becomes another name for them.
+        if (!qk || x.keys.indexOf(qk) >= 0) return;
+        e.key = qk; e.name = base(x); e.id = x.id || '';
+        post({ role: ROLE[role], alias: qk, name: e.name, id: e.id });
+        news.push('🔗 "' + qk + '" now also finds ' + e.name + '.');
+      } else {
+        var w = low(nm).split(' ');
+        if (role === 'dr' && !id) { retry = 'The kk number is needed (it is the registrar\'s user on the form).'; return; }
+        if (w.length < 2 || !/^[A-Za-z' -]{3,60}$/.test(nm)) { retry = 'Please type the first and last name in English.'; return; }
+        var taken = function (k) { return list.some(function (y) { return y.keys.indexOf(k) >= 0; }); };
+        var last = w[w.length - 1];
+        e.key = [qk].concat(role === 'consultant' ? [last, last + w[0].charAt(0)] : [w[0], w[0] + w[1].charAt(0)])
+          .filter(function (k) { return /^[a-z][a-z'-]+$/.test(k) && !taken(k); })[0];
+        if (!e.key) { retry = 'That name is already used: add a second name.'; return; }
+        e.name = nm; e.id = id;
+        post({ role: ROLE[role], key: e.key, name: nm, id: id });
+        news.push(ADD_URL ? '➕ ' + nm + ' added to the staff list for everyone.' : '⚠️ ' + nm + ' is not on the staff list: add them to the Sheet.');
+      }
+      remember(e); learned.push(e);
+      ls('consentFillerLearned', JSON.stringify(learned));
+    };
+    var pend = null;
+    try { pend = JSON.parse(ls('consentFillerAsk') || 'null'); } catch (e) {}
+    if (pend && answer && staff[pend.role] && Date.now() - pend.ts < 15 * 60 * 1000) { ls('consentFillerAsk', ''); news = pend.news || []; learn(pend.role, pend.q, answer); }
+
     var diag = '\n(Clipboard: ' + clipKind + ', ' + clipTxt.length + ' characters, starts "' + clipTxt.slice(0, 12).replace(/\d/g, '#') + '", ' + (block ? 'block found with ' + Object.keys(block).join(', ') : 'no CONSENT line') +
       '; staff list: ' + staff.dr.length + ' Dr user, ' + staff.consultant.length + ' consultants, ' + staff.nurse.length + ' nurses.)';
     var form = /AD-CON-01/i.test(location.pathname) ? 'surgical' : /AD-CON-03/i.test(location.pathname) ? 'blood' : null;
@@ -190,10 +279,11 @@
 
     // Registrar (Dr's user): the block's "registrar:" if given (a name, subspecialty or ID), else the first line.
     if (!staff.dr.length) return done('⚠️ No registrar in the staff list.');
-    var dr = staff.dr[0], drNote = '', wantDr = String((c && c.registrar) || me.registrar || '').trim();
+    var dr = staff.dr[0], drNote = '', askDr = '', wantDr = String((c && c.registrar) || me.registrar || '').trim();
     if (wantDr) {
-      dr = find(staff.dr, wantDr) || staff.dr.filter(function (x) { return low(x.id) === low(wantDr); })[0] || null;
+      dr = staff.dr.filter(function (x) { return low(x.id) === low(wantDr); })[0] || find(staff.dr, wantDr) || null;
       if (!dr && /^kk\d+$/i.test(wantDr)) dr = { id: wantDr, name: wantDr };
+      if (!dr && skip.dr !== low(wantDr)) askDr = wantDr;
       if (!dr) { dr = staff.dr[0]; drNote = ' — "' + wantDr + '" is not on the staff list, so the default was used'; }
     }
 
@@ -206,6 +296,53 @@
         return false;
       });
     }
+
+    var people = function () {
+      // Single names not on the list are asked in the ❓ popup (shared Shortcut); "-" skips one.
+      var unknown = [], skipped = function (role, q) { return skip[role] === low(q); };
+      // Resident (witness 2): the block's "resident:" if given; a full name not on the list is used as written.
+      var resident = null, residentNote = '', rq = String(c.resident || me.resident || '').trim();
+      if (rq && !skipped('resident', rq)) {
+        resident = find(staff.resident, rq);
+        if (!resident && /\s/.test(rq)) { resident = { id: '', name: titled(rq) }; residentNote = ' (not on the staff list)'; }
+        if (!resident) { residentNote = ' — "' + rq + '" is not on the staff list: type the full name'; unknown.push({ role: 'resident', q: rq }); }
+      } else if (!rq) resident = staff.resident[0] || null;
+      // Several consultants on the list → never guess; one → it's the default. A surname not on
+      // the list is used as written and flagged.
+      var cq = String(c.consultant || '').trim(), consultant = find(staff.consultant, cq), consultantNote = '';
+      if (!consultant && cq && !skipped('consultant', cq)) {
+        consultant = { name: titled(cq) }; consultantNote = ' (not on the staff list — check the spelling)';
+        if (!/\s/.test(cq)) unknown.push({ role: 'consultant', q: cq });
+      }
+      if (!consultant && !cq && staff.consultant.length === 1) consultant = staff.consultant[0];
+      if (!consultant) consultantNote = 'not given — type it in';
+      var nurse = null, q = String((mem && mem.nurse) || c.nurse || '').trim();
+      if (q && !/^(none|no|-)$/i.test(q) && !skipped('nurse', q)) {
+        var inline = q.split('|').map(function (x) { return x.trim(); });
+        if (inline.length >= 3) nurse = { id: inline[1], name: inline[2] };
+        else {
+          nurse = find(staff.nurse, q);
+          // Not on the list: a full name is used as written; a single first name can't be.
+          if (!nurse && /\s/.test(q)) nurse = { id: '', name: titled(q), unlisted: true };
+          if (!nurse) unknown.push({ role: 'nurse', q: q });
+        }
+      }
+      return { resident: resident, residentNote: residentNote, consultant: consultant, consultantNote: consultantNote, nurse: nurse, unknown: unknown };
+    };
+    // The next ❓ question for the shared Shortcut (registrar first: it goes in before the patient loads).
+    var question = function (p) {
+      var u = (askDr ? [{ role: 'dr', q: askDr }] : []).concat(p.unknown)[0];
+      if (!canAsk || !u) return '';
+      ls('consentFillerAsk', JSON.stringify({ role: u.role, q: u.q, ts: Date.now(), news: news })); // news: shown when the form is filled
+      var maybe = close(staff[u.role], u.q).map(base);
+      return done('❓ ' + (retry ? retry + '\n' : '') +
+        { dr: 'Registrar', consultant: 'Consultant', resident: 'Witness 2', nurse: 'Nurse' }[u.role] + ' "' + u.q + '" ' +
+        (maybe.length ? 'could be ' + maybe.join(' or ') + '.' : 'isn\'t on the staff list.') + '\n' +
+        (u.role === 'dr' ? 'Type their full name and kk number (e.g. Ahmed Ali kk123456)' : 'Type the full name (first and last, in English)') +
+        ': ' + (maybe.length ? 'a new name is ' : 'it will be ') + 'added for everyone. Type - to ' +
+        (u.role === 'dr' ? 'use your default registrar.' : u.role === 'nurse' ? 'leave no nurse.' : 'leave it empty.'));
+    };
+    var p = c ? people() : null;
 
     // ---------- 1. patient not loaded yet → fill everything now, type the MRN LAST and let its reload
     // load the patient (the site keeps fields filled before a reload). One tap. (2026-10-11)
@@ -220,6 +357,7 @@
       if (!targetMrn && viaShortcut) return done('🔢 MRN needed');
       if (!targetMrn) return done('⚠️ No MRN. Use Share → Fill consent, or type the MRN in the form.' + diag);
       if (inked) return done('⚠️ A signature is already on this page and the patient isn\'t loaded. Open a fresh form.');
+      if (question(p)) return;
       if (low(val('drNo')) !== low(dr.id)) $('drNo').value = dr.id;
       $('MRN').value = targetMrn;
       after = fire('MRN');
@@ -235,45 +373,6 @@
     }
     var patient = val('ptName') || 'Patient loading';
 
-    var people = function () {
-      // Resident (witness 2): the block's "resident:" if given; a full name not on the list is used as written.
-      var resident = null, residentNote = '', rq = String(c.resident || me.resident || '').trim();
-      if (rq) {
-        resident = find(staff.resident, rq);
-        if (!resident && /\s/.test(rq)) { resident = { id: '', name: titled(rq) }; residentNote = ' (not on the staff list)'; }
-        if (!resident) residentNote = ' — "' + rq + '" is not on the staff list: type the full name';
-      } else resident = staff.resident[0] || null;
-      // Several consultants on the list → never guess; one → it's the default. A surname not on
-      // the list is used as written and flagged.
-      var consultant = find(staff.consultant, c.consultant), consultantNote = '';
-      if (!consultant && c.consultant) { consultant = { name: titled(c.consultant) }; consultantNote = ' (not on the staff list — check the spelling)'; }
-      if (!consultant && staff.consultant.length === 1) consultant = staff.consultant[0];
-      if (!consultant) consultantNote = 'not given — type it in';
-      var nurse = null, unknown = '', q = String((mem && mem.nurse) || c.nurse || '').trim();
-      if (q && !/^(none|no|-)$/i.test(q)) {
-        var inline = q.split('|').map(function (x) { return x.trim(); });
-        if (inline.length >= 3) nurse = { id: inline[1], name: inline[2] };
-        else {
-          nurse = find(staff.nurse, q);
-          // Not on the list: a full name is used as written; a single first name can't be.
-          if (!nurse && /\s/.test(q)) { nurse = { id: '', name: q.replace(/\b\w/g, function (ch) { return ch.toUpperCase(); }) }; nurse.unlisted = !(mem && mem.nurseAdded === nurse.name); }
-          // The Shortcut asked for the full name: someone already on the list (the block had a typo)
-          // is used; a new first and last name is used and added to the shared Sheet.
-          if (!nurse && answer && !/^(-|none|no)$/i.test(answer)) {
-            nurse = find(staff.nurse, answer);
-            if (!nurse) {
-              var full = titled(answer.replace(/\s+/g, ' ')), w = low(full).split(' ');
-              var taken = function (k) { return staff.nurse.some(function (x) { return x.key === k; }); };
-              var key = [low(q), w[0], w[0] + (w[1] || '').charAt(0)].filter(function (k) { return /^[a-z][a-z'-]+$/.test(k) && !taken(k); })[0];
-              nurse = { id: '', name: full, key: key };
-              if (w.length > 1 && key && /^[A-Za-z' -]{3,60}$/.test(full)) nurse.added = true; else nurse.unlisted = true;
-            }
-          }
-          if (!nurse && !(answer && /^(-|none|no)$/i.test(answer))) unknown = q;
-        }
-      }
-      return { resident: resident, residentNote: residentNote, consultant: consultant, consultantNote: consultantNote, nurse: nurse, unknown: unknown };
-    };
     var setv = function (id, v) {
       var e = $(id); if (!e) return;
       e.value = v == null ? '' : v;
@@ -307,9 +406,7 @@
       if (!c) return done('⚠️ ' + patient + ': no consent block copied. Copy the block from your AI first.' + diag);
       if (form === 'surgical' && !(c.procedure && c.complications && c['procedure ar'] && c['complications ar']))
         return done('⚠️ The copied block has no procedure or complications. For a surgical consent, copy the whole block.');
-      var p = people();
-      if (p.unknown && canAsk && !answer)
-        return done('❓ Nurse "' + p.unknown + '" isn\'t on the staff list.\nType the nurse\'s full name (first and last): it will be added for everyone. Type - for no nurse.');
+      if (question(p)) return;
       if (form === 'surgical') {
         setBoth('doctorFollow', p.consultant ? p.consultant.name : '');
         setv('surNameEn', c.procedure); setv('procedure', c.complications);
@@ -327,12 +424,7 @@
       // The patient on the page is the one remembered (a reused block may carry an older one).
       if (!mem || (digits(val('MRN')) && mem.mrn !== digits(val('MRN')))) mem = { mrn: digits(val('MRN')), block: c };
       mem.filled = mem.filled || {}; mem.filled[form] = true;
-      if (p.nurse && (p.nurse.added || p.nurse.unlisted)) mem.nurse = p.nurse.name; // the blood tab doesn't ask again
-      if (p.nurse && p.nurse.added) {
-        mem.nurseAdded = p.nurse.name;
-        // Sent even if the page reloads straight after (keepalive); the Sheet answer can't be read here.
-        if (ADD_URL) try { fetch(ADD_URL, { method: 'POST', mode: 'no-cors', keepalive: true, body: JSON.stringify({ key: p.nurse.key, name: p.nurse.name }) }); } catch (e) {}
-      }
+      mem.skip = skip;
       save(mem);
       nurseButtons();
       var openBlood = form === 'surgical';
@@ -340,13 +432,12 @@
       var notes = [p.consultantNote && p.consultantNote !== 'not given — type it in' ? 'Consultant ' + (p.consultant ? p.consultant.name : '') + p.consultantNote : '',
         form === 'surgical' && !p.consultant ? 'No consultant: type it in.' : '',
         p.nurse && p.nurse.unlisted ? 'Nurse ' + p.nurse.name + ' is not on the staff list.' : '',
-        p.nurse && p.nurse.added && !ADD_URL ? 'Nurse ' + p.nurse.name + ' is not on the staff list: add them to the Sheet.' : '',
-        p.unknown ? 'Nurse "' + p.unknown + '" is not on the staff list: type the full name.' : '',
+        p.unknown.some(function (u) { return u.role === 'nurse'; }) ? 'Nurse "' + (mem.nurse || c.nurse) + '" is not on the staff list: type the full name.' : '',
         drNote ? 'Registrar' + drNote + '.' : '', p.residentNote ? 'Witness 2' + p.residentNote + '.' : ''].filter(Boolean);
       return done('✅ ' + (after ? cap(form) : patient + ' — ' + form) + ' consent filled.\n' +
         [form === 'surgical' && p.consultant ? p.consultant.name : '', p.nurse ? 'nurse ' + p.nurse.name.split(' ')[0] : 'no nurse',
           'registrar ' + (dr.name || dr.id).split(' — ')[0].split(' ')[0], p.resident ? 'witness ' + p.resident.name.split(' ')[0] : '', high ? 'HIGH RISK' : ''].filter(Boolean).join(' · ') +
-        (p.nurse && p.nurse.added && ADD_URL ? '\n➕ ' + p.nurse.name + ' added to the staff list for everyone.' : '') +
+        (news.length ? '\n' + news.join('\n') : '') + (guessed.length ? '\n🔎 ' + guessed.join('; ') + '.' : '') +
         (notes.length ? '\n⚠️ ' + notes.join('\n⚠️ ') : '') +
         '\nNext: ' + (after ? 'check the patient\'s name when the page reloads. ' : '') +
         (openBlood ? 'Opening the blood consent: there, Share → Fill consent.' : (after ? 'Then at' : 'At') + ' the bedside, tap who signs on each form.'));
